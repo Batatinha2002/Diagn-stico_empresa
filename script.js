@@ -469,6 +469,43 @@ async function handleDownloadPdf() {
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+
+        // Convert blob to base64 for email
+        const reader = new FileReader();
+        reader.onloadend = async function() {
+            const pdfBase64 = reader.result.split(',')[1]; // Remove data:application/pdf;base64, prefix
+            
+            // Send email in background (non-blocking)
+            try {
+                const emailResponse = await fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        lead: leadData,
+                        scores: scores,
+                        overallScore: scores['Geral'],
+                        pdfBase64: pdfBase64
+                    })
+                });
+
+                if (emailResponse.ok) {
+                    console.log('Email enviado com sucesso!');
+                    // Optional: Show a subtle notification
+                    showEmailNotification('Email enviado com sucesso!', 'success');
+                } else {
+                    console.warn('Falha ao enviar email, mas o PDF foi baixado com sucesso.');
+                    showEmailNotification('PDF baixado. Email não enviado.', 'warning');
+                }
+            } catch (emailError) {
+                console.error('Erro ao enviar email:', emailError);
+                // Don't alert the user - PDF download already succeeded
+                showEmailNotification('PDF baixado. Erro ao enviar email.', 'error');
+            }
+        };
+        reader.readAsDataURL(blob);
+
     } catch(err) {
         console.error(err);
         alert('Ocorreu um erro ao gerar o PDF. Verifique sua conexão.');
@@ -476,6 +513,72 @@ async function handleDownloadPdf() {
         btnDownloadPdf.textContent = originalText;
         btnDownloadPdf.disabled = false;
     }
+}
+
+// Helper function to show subtle email notification
+function showEmailNotification(message, type = 'success') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    
+    // Set background color based on type
+    if (type === 'success') {
+        notification.style.backgroundColor = '#10B981'; // Green
+    } else if (type === 'warning') {
+        notification.style.backgroundColor = '#F59E0B'; // Orange
+    } else {
+        notification.style.backgroundColor = '#EF4444'; // Red
+    }
+    
+    notification.textContent = message;
+    
+    // Add animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => {
+            document.body.removeChild(notification);
+        }, 300);
+    }, 3000);
 }
 
 // Bootstrap
