@@ -209,8 +209,8 @@ function handleLeadSubmit(e) {
         scores: calculateScores()
     };
 
-    localStorage.setItem('diagnostico_lead', JSON.stringify(finalData));
-    console.log("Data saved locally:", finalData);
+    // Data is kept in memory only (not persisted)
+    console.log("Data collected:", finalData);
 
     generateResults();
 }
@@ -400,9 +400,236 @@ async function handleDownloadPdf() {
     btnDownloadPdf.disabled = true;
 
     try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+        const pw = doc.internal.pageSize.getWidth();   // ~595
+        const ph = doc.internal.pageSize.getHeight();  // ~842
+        const mx = 50;   // margin X
+        const maxW = pw - mx * 2;
+        let y = 0;
+
         const scores = calculateScores();
-        
-        // Build analysis text array to send to backend
+        const gold = [197, 168, 109];    // #C5A869
+        const darkBg = [10, 10, 10];     // #0A0A0A
+        const white = [255, 255, 255];
+        const gray = [142, 142, 142];
+
+        // ========== HELPER FUNCTIONS ==========
+        function addPage() {
+            doc.addPage();
+            y = 0;
+            drawPageBg();
+        }
+
+        function drawPageBg() {
+            doc.setFillColor(...darkBg);
+            doc.rect(0, 0, pw, ph, 'F');
+        }
+
+        function checkPageBreak(needed) {
+            if (y + needed > ph - 60) {
+                addPage();
+                y = 50;
+            }
+        }
+
+        function drawGoldLine(yPos) {
+            doc.setDrawColor(...gold);
+            doc.setLineWidth(0.5);
+            doc.line(mx, yPos, pw - mx, yPos);
+        }
+
+        // ========== PAGE 1: COVER ==========
+        drawPageBg();
+
+        // Gold accent bar at the very top
+        doc.setFillColor(...gold);
+        doc.rect(0, 0, pw, 6, 'F');
+
+        // Branding
+        y = 80;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...gold);
+        doc.setFontSize(32);
+        doc.text('RESULTA MAIS', mx, y);
+
+        y += 24;
+        doc.setFontSize(10);
+        doc.setTextColor(...gray);
+        doc.text('ACELERAÇÃO EMPRESARIAL  •  ESTRATÉGIA  •  SUCESSO', mx, y);
+
+        y += 60;
+        drawGoldLine(y);
+
+        // Title
+        y += 50;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...white);
+        doc.setFontSize(28);
+        doc.text('Diagnóstico Empresarial 360°', mx, y);
+
+        y += 30;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(13);
+        doc.setTextColor(...gray);
+        doc.text('Relatório completo de performance e maturidade empresarial.', mx, y);
+
+        // Lead data box
+        y += 60;
+        doc.setFillColor(20, 20, 20);
+        doc.roundedRect(mx, y, maxW, 120, 8, 8, 'F');
+
+        y += 30;
+        doc.setFontSize(10);
+        doc.setTextColor(...gold);
+        doc.setFont('helvetica', 'bold');
+        doc.text('DADOS DO PARTICIPANTE', mx + 20, y);
+
+        y += 22;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...white);
+        doc.setFontSize(11);
+        const leadItems = [
+            `Nome: ${leadData?.name || '-'}`,
+            `Empresa: ${leadData?.company || '-'}`,
+            `Email: ${leadData?.email || '-'}`,
+            `Telefone: ${leadData?.phone || '-'}`
+        ];
+        leadItems.forEach(item => {
+            doc.text(item, mx + 20, y);
+            y += 18;
+        });
+
+        // Date
+        y += 30;
+        doc.setFontSize(10);
+        doc.setTextColor(...gray);
+        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, mx, y);
+
+        // Footer line
+        drawGoldLine(ph - 60);
+        doc.setFontSize(8);
+        doc.setTextColor(...gray);
+        doc.text('Relatório gerado por Resulta Mais — Todos os direitos reservados.', mx, ph - 40);
+
+        // ========== PAGE 2: RADAR CHART ==========
+        addPage();
+
+        // Gold accent bar
+        doc.setFillColor(...gold);
+        doc.rect(0, 0, pw, 6, 'F');
+
+        y = 50;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...gold);
+        doc.setFontSize(20);
+        doc.text('RADAR ESTRATÉGICO', mx, y);
+
+        y += 12;
+        drawGoldLine(y);
+
+        // Embed radar chart image
+        y += 30;
+        if (radarChartInstance) {
+            const chartImg = radarChartInstance.toBase64Image('image/png', 1);
+            const chartSize = 340;
+            const chartX = (pw - chartSize) / 2;
+            doc.addImage(chartImg, 'PNG', chartX, y, chartSize, chartSize);
+            y += chartSize + 30;
+        }
+
+        // General score
+        const generalScore = scores['Geral'];
+        const generalStatus = getStatusByScore(generalScore);
+
+        doc.setFillColor(20, 20, 20);
+        doc.roundedRect(mx, y, maxW, 70, 8, 8, 'F');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...white);
+        doc.setFontSize(14);
+        doc.text('Nota Geral', mx + 20, y + 28);
+
+        doc.setFontSize(32);
+        doc.setTextColor(...gold);
+        doc.text(generalScore.toFixed(1), mx + 20, y + 58);
+
+        // Status badge
+        doc.setFontSize(12);
+        doc.setTextColor(...gray);
+        doc.text(`  ${generalStatus.text}`, mx + 90, y + 55);
+
+        y += 90;
+
+        // Category scores
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...gold);
+        doc.setFontSize(16);
+        doc.text('PONTUAÇÕES POR ÁREA', mx, y);
+        y += 25;
+
+        categories.forEach(cat => {
+            checkPageBreak(55);
+            const score = scores[cat];
+            const status = getStatusByScore(score);
+            const pct = (score / 10) * maxW;
+
+            // Category row
+            doc.setFillColor(20, 20, 20);
+            doc.roundedRect(mx, y, maxW, 45, 6, 6, 'F');
+
+            // Label
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...white);
+            doc.setFontSize(11);
+            doc.text(cat, mx + 15, y + 18);
+
+            // Score
+            doc.setTextColor(...gold);
+            doc.setFontSize(18);
+            doc.text(score.toFixed(1), pw - mx - 60, y + 22);
+
+            // Progress bar background
+            doc.setFillColor(30, 30, 30);
+            doc.roundedRect(mx + 15, y + 28, maxW - 100, 8, 4, 4, 'F');
+
+            // Progress bar fill
+            doc.setFillColor(...gold);
+            const barW = Math.max(4, ((score / 10) * (maxW - 100)));
+            doc.roundedRect(mx + 15, y + 28, barW, 8, 4, 4, 'F');
+
+            // Status
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...gray);
+            doc.text(status.text, pw - mx - 30, y + 36, { align: 'right' });
+
+            y += 55;
+        });
+
+        // Footer
+        drawGoldLine(ph - 60);
+        doc.setFontSize(8);
+        doc.setTextColor(...gray);
+        doc.text('Relatório gerado por Resulta Mais — Todos os direitos reservados.', mx, ph - 40);
+
+        // ========== PAGE 3: ANALYSIS ==========
+        addPage();
+
+        // Gold accent bar
+        doc.setFillColor(...gold);
+        doc.rect(0, 0, pw, 6, 'F');
+
+        y = 50;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...gold);
+        doc.setFontSize(20);
+        doc.text('ANÁLISE DETALHADA', mx, y);
+
+        y += 12;
+        drawGoldLine(y);
+        y += 30;
+
         const analysisDict = {
             'Mentalidade': {
                 critical: "Sua mentalidade pode estar limitando o crescimento do negócio. Há foco excessivo no operacional e pouca clareza estratégica.",
@@ -427,88 +654,91 @@ async function handleDownloadPdf() {
             'Liderança': {
                 critical: "Equipe desalinhada e centralização excessiva. O empresário é o gargalo da operação e não há gestão de pessoas.",
                 developing: "Há líderes em formação ou delegação inicial, mas faltam rituais de gestão consistentes para acompanhar o time.",
-                strong: "Liderança forte e processos delegados. Equipe engajada, rodando a empresa com alto nível de autonomia e eficacia."
+                strong: "Liderança forte e processos delegados. Equipe engajada, rodando a empresa com alto nível de autonomia e eficácia."
             }
         };
 
-        const analysisCategories = categories.map(cat => {
+        categories.forEach(cat => {
+            checkPageBreak(100);
+
             const score = scores[cat];
             const status = getStatusByScore(score);
-            return {
-                category: cat,
-                text: analysisDict[cat][status.id]
-            };
+            const analysisText = analysisDict[cat][status.id];
+
+            // Category card
+            doc.setFillColor(20, 20, 20);
+            const textLines = doc.splitTextToSize(analysisText, maxW - 40);
+            const cardH = 55 + (textLines.length * 15);
+            doc.roundedRect(mx, y, maxW, cardH, 8, 8, 'F');
+
+            // Status indicator dot
+            if (status.id === 'critical') doc.setFillColor(239, 68, 68);
+            else if (status.id === 'developing') doc.setFillColor(245, 158, 11);
+            else doc.setFillColor(16, 185, 129);
+            doc.circle(mx + 18, y + 22, 5, 'F');
+
+            // Category name
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...white);
+            doc.setFontSize(14);
+            doc.text(cat, mx + 32, y + 26);
+
+            // Score & status
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...gold);
+            doc.setFontSize(14);
+            doc.text(`${score.toFixed(1)}`, pw - mx - 20, y + 26, { align: 'right' });
+
+            // Analysis text
+            y += 42;
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...gray);
+            doc.setFontSize(10);
+            textLines.forEach(line => {
+                doc.text(line, mx + 20, y);
+                y += 15;
+            });
+
+            y += 20;
         });
 
-        // Get base64 chart image
-        // To ensure background is not transparent in PDF, chart needs to be drawn on a white canvas or handled by pdffkit
-        const chartImage = radarChartInstance.toBase64Image('image/png', 1);
+        // ========== FINAL: Resulta Mais CTA ==========
+        checkPageBreak(120);
+        y += 10;
+        drawGoldLine(y);
+        y += 40;
 
-        const response = await fetch('/api/generate-pdf', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                lead: leadData,
-                scores: scores,
-                analysisCategories: analysisCategories,
-                chartImage: chartImage
-            })
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...gold);
+        doc.setFontSize(16);
+        doc.text('Quer um diagnóstico estratégico completo?', mx, y);
+
+        y += 25;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...gray);
+        doc.setFontSize(11);
+        const ctaLines = doc.splitTextToSize(
+            'A Resulta Mais oferece aceleração empresarial personalizada para levar sua empresa ao próximo nível. Entre em contato conosco para uma consultoria estratégica exclusiva.',
+            maxW
+        );
+        ctaLines.forEach(line => {
+            doc.text(line, mx, y);
+            y += 16;
         });
 
-        if (!response.ok) throw new Error('Erro na geração do PDF');
+        // Footer
+        drawGoldLine(ph - 60);
+        doc.setFontSize(8);
+        doc.setTextColor(...gray);
+        doc.text('Relatório gerado por Resulta Mais — Todos os direitos reservados.', mx, ph - 40);
 
-        // Create a blob and download it
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Diagnostico_${leadData?.company || 'Estrategico'}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-
-        // Convert blob to base64 for email
-        const reader = new FileReader();
-        reader.onloadend = async function() {
-            const pdfBase64 = reader.result.split(',')[1]; // Remove data:application/pdf;base64, prefix
-            
-            // Send email in background (non-blocking)
-            try {
-                const emailResponse = await fetch('/api/send-email', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        lead: leadData,
-                        scores: scores,
-                        overallScore: scores['Geral'],
-                        pdfBase64: pdfBase64
-                    })
-                });
-
-                if (emailResponse.ok) {
-                    console.log('Email enviado com sucesso!');
-                    // Optional: Show a subtle notification
-                    showEmailNotification('Email enviado com sucesso!', 'success');
-                } else {
-                    console.warn('Falha ao enviar email, mas o PDF foi baixado com sucesso.');
-                    showEmailNotification('PDF baixado. Email não enviado.', 'warning');
-                }
-            } catch (emailError) {
-                console.error('Erro ao enviar email:', emailError);
-                // Don't alert the user - PDF download already succeeded
-                showEmailNotification('PDF baixado. Erro ao enviar email.', 'error');
-            }
-        };
-        reader.readAsDataURL(blob);
+        // ========== SAVE ==========
+        const fileName = `Diagnostico_360_${leadData?.company || 'Empresa'}.pdf`;
+        doc.save(fileName);
 
     } catch(err) {
         console.error(err);
-        alert('Ocorreu um erro ao gerar o PDF. Verifique sua conexão.');
+        alert('Ocorreu um erro ao gerar o PDF. Tente novamente.');
     } finally {
         btnDownloadPdf.textContent = originalText;
         btnDownloadPdf.disabled = false;
